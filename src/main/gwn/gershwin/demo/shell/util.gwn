@@ -1,0 +1,19 @@
+(ns gershwin.demo.shell.util
+  (:import java.io.File))
+
+(defn open-file-in-browser
+  "Opens a Java File object in the default system web browser.  May not
+  work on all platforms.  Returns File on success, nil if not
+  supported."
+  [^File f]
+  (try
+    (when (clojure.lang.Reflector/invokeStaticMethod "java.awt.Desktop"
+                                                     "isDesktopSupported" (to-array nil))
+      (-> (clojure.lang.Reflector/invokeStaticMethod "java.awt.Desktop"
+                                                     "getDesktop" (to-array nil))
+          (.open f))
+      f)
+    (catch ClassNotFoundException e
+      nil)))
+
+: open-file-in-browser [url --] #(open-file-in-browser %) apply drop .

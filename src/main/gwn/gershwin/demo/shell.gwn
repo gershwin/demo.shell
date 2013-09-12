@@ -1,0 +1,254 @@
+(ns gershwin.demo.shell
+  (:require [me.raynes.fs :as fs]
+            [me.raynes.conch :refer [programs with-programs]]
+            [clansi :as ansi]
+            [cemerick.pomegranate :refer [add-dependencies]]
+            [cemerick.pomegranate.aether :refer [maven-central]])
+  (:require-words [gershwin.demo.shell.util :as util]
+                  [gershwin.java.io :as io]
+                  [gershwin.main :as main])
+  (:import [java.io File])
+  (:gen-class))
+
+: add-dependencies "Make it trivial to write scripts that require Maven dependencies"
+  [deps-vectors --]
+  #(stack-void
+    (add-dependencies :coordinates %
+                      :repositories (merge maven-central
+                                           {"clojars" "http://clojars.org/repo"}))) apply .
+
+: native-program [name --] #(programs %) apply .
+
+: nat-grep "Native 'grep' call. Results as seq on TOS."
+  [input arg -- out]
+  #(with-programs [grep]
+     (grep %1 {:in %2 :seq true})) apply2 .
+
+: nat-ps "Native 'ps' call. Results as seq on TOS."
+  [args -- out]
+  #(with-programs [ps]
+     (ps % {:seq true})) apply .
+
+: user-home-path
+  [-- path]
+  "user.home" #(System/getProperty %) apply .
+
+: replace-tilde- "Replace ~ with user.home if ~ is present."
+  [tilde-path -- full-path]
+  dup string?
+  #[
+    dup "~" swap starts-with?
+    #[ 1 swap substring-from
+       user-home-path
+       swap str2 ] when
+    ] when .
+
+: file "'Coerce' TOS to a file."
+  [x -- file]
+  replace-tilde-
+  #(fs/file %) apply .
+
+: files "'Coerce' collection of things to files."
+  [coll -- coll] #[ file ] map .
+
+: list-dir "List files in directory specified by path on TOS. Note this returns a collection of java.io.File objects."
+  [x -- coll] file #(seq (.listFiles %)) apply .
+
+: absolute-path [x -- abs-path] #(fs/absolute-path %) apply .
+
+: absolute-file [x -- abs-file] absolute-path file apply .
+
+: absolute-files [coll -- coll] #[ absolute-file ] map .
+
+: absolute? [x -- ?] file #(fs/absolute? %) apply .
+
+: ls-at "Put seq of files relative to path on TOS."
+  [path -- coll]
+  file list-dir .
+
+: ls "Put seq of files under current working directory on TOS."
+  [-- coll]
+  fs/*cwd* ls-at .
+
+: exists? [f -- ?] file #(.exists %) apply .
+
+: directory? [f -- ?] file #(.isDirectory %) apply .
+
+: file? [f -- ?] file #(.isFile %) apply .
+
+: hidden? [f -- ?] file #(.isHidden %) apply .
+
+: cd "Given either a string or File reference, change the internal value of the current working directory to the given path."
+  [path --]
+  dup exists?
+  #[
+    file
+    (fn [path]
+      (alter-var-root #'fs/*cwd*
+                      (fn [_ path] path)
+                      path)) apply drop ls
+    ]
+  #[ #(throw (IllegalArgumentException. (str "The path '" % "' does not exist."))) apply ] if .
+
+: delete [f -- ?] #(fs/delete %) apply .
+
+: find-files [path pattern -- coll] #(fs/find-files %2 %1) apply2 .
+
+: lines "Given a file or path, return a vector of the lines of that file."
+  [f -- coll]
+  file io/reader #[ line-seq vec ] swap with-open .
+
+: map-lines "Given a file or path and a quotation, map the quotation against each line in the file."
+  [f quot -- coll]
+  swap
+  file io/reader
+  #[ line-seq swap map ] swap with-open .
+
+: reduce-lines "Given a file or path and a quotation, perform a reduction over the lines of the file."
+  [f quot]
+  swap
+  file io/reader
+  #[ line-seq swap reduce ] swap with-open .
+
+: reduce-lines-with "Same as reduce-lines, but uses reduce-with and thus expects a starting data structure."
+  [f acc quot]
+  rot
+  file io/reader
+  #[ line-seq rot rot reduce-with ] swap with-open .
+
+: do-lines "Given a file or path and a quotation, invoke the quotation with each line of the file at TOS. Designed for side-effects, does not put anything on stack as a result."
+  [f quot --]
+  swap
+  file io/reader
+  #[ line-seq swap doseq ] swap with-open .
+
+: count-lines [f -- n] 0 #[ drop inc ] reduce-lines-with .
+
+: count-words [f -- n] 0 #[ #"\w+" re-seq count + ] reduce-lines-with .
+
+: temp-file [prefix suffix -- f] #(fs/temp-file %2 %1) apply2 .
+
+: readable? [f -- readable]
+  #(fs/readable? %) apply
+  #[ ::readable ] #[ nil ] if .
+
+: writeable? [f -- writeable]
+  #(fs/writeable? %) apply
+  #[ ::writeable ] #[ nil ] if .
+
+: executable? [f -- executable]
+  #(fs/executable? %) apply
+  #[ ::executable ] #[ nil ] if .
+
+: base-name [f -- name] #(fs/base-name %) apply .
+
+: permissions [f -- perms-coll]
+  #[ executable? ] #[ writeable? ] #[ readable? ] tri vector3
+  [
+   #[ dup [nil nil nil] = ] #[ 0 ]
+   #[ dup [::executable nil nil] = ] #[ 1 ]
+   #[ dup [nil ::writeable nil] = ] #[ 2 ]
+   #[ dup [::executable ::writeable nil] = ] #[ 3 ]
+   #[ dup [nil nil ::readable] = ] #[ 4 ]
+   #[ dup [::executable nil ::readable] = ] #[ 5 ]
+   #[ dup [nil ::writeable ::readable] = ] #[ 6 ]
+   #[ dup [::executable ::writeable ::readable] = ] #[ 7 ]
+   #[ :else ] #[ 42 ]
+   ] cond nip
+  ;; Global, group, and user are same for now
+  repeat 3 take .
+
+: last-modified
+  [f -- date]
+  #(fs/mod-time %) apply
+  #(java.util.Date. %) apply .
+
+: size [f -- size] #(fs/size %) apply .
+
+: file-permissions "String to display for a file's permissions"
+  [f -- str] permissions str* .
+
+: file-last-modified "String to display for a file's last modified date/time"
+  [f -- str] last-modified str .
+
+: file-size "String to display for a file's size"
+  [f -- str] size str .
+
+: file-base-name "String to display for a file's base (file) name"
+  [f -- str] base-name .
+
+: grep
+  [coll patt -- coll]
+  (let [[patt coll] (pop-n 2)]
+    (filter (fn [x] (re-find (re-pattern patt) (str x))) coll)) .
+
+;; PRINTING
+
+: print-file-list-header [--]
+  [
+   "Perms\tModified\t\t\tSize\tName\n"
+   (apply str (take 60 (repeat "-")))
+  ] str* println .
+
+: red [x -- red-x] #(ansi/style % :red) apply .
+: blue [x -- blue-x] #(ansi/style % :blue) apply .
+: green [x -- green-x] #(ansi/style % :green) apply .
+
+: print-file
+  [f --]
+  #[ file-permissions red ]
+  #[ file-last-modified ]
+  #[ file-size ]
+  #[ file-base-name blue ]
+  quad vector4
+  "%s\t%s\t%s\t%s" format* println .
+
+: file? [f -- ?] (ap (partial instance? File)) .
+
+(defn file? [x] (instance? File x))
+
+: write-to-temp-file [content -- file]
+  "prez_" ".html" temp-file dup rot swap spit drop .
+
+: run "Load a file as a Gershwin file."
+  [f -- obj]
+  absolute-path load-gershwin-file .
+
+: open "Open a file in 'default' program."
+  [file --] file util/open-file-in-browser .
+
+: -main [args --]
+  (binding [*print-stack* true]
+    (main/repl :init (fn []
+                       (in-ns 'user)
+                       (refer 'gershwin.core)
+                       (require-words '[gershwin.pprint :refer :all])
+                       (refer 'gershwin.demo.shell))
+               :prompt #(printf "[%s] > " fs/*cwd*)
+               :print (fn [_]
+                        (let [x (clojure.lang.GershwinStack/peek)]
+                          (cond
+
+                           (some #{x} [:quit :exit])
+                           (do (println "Bye!") (System/exit 0))
+
+                           (instance? java.io.File x)
+                           (with-gershwin
+                             print-file-list-header
+                             dup print-file
+                             "" println
+                             )
+
+                           (and (coll? x)
+                                (every? file? x))
+                           (do
+                             (with-gershwin
+                               print-file-list-header
+                               x #[ print-file ] each
+                               "" println))
+
+                           :else
+                           (prn x))
+                          (when *print-stack*
+                            (println "Data Stack:")
+                            (prn (clojure.lang.GershwinStack/getStack))))))) .
