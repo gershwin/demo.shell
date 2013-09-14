@@ -17,6 +17,12 @@
                       :repositories (merge maven-central
                                            {"clojars" "http://clojars.org/repo"}))) apply .
 
+: print-each [coll --]
+  #[ print ] each .
+
+: println-each [coll --]
+  #[ println ] each .
+
 : native-program [name --] #(programs %) apply .
 
 : nat-grep "Native 'grep' call. Results as seq on TOS."
@@ -24,6 +30,7 @@
   #(with-programs [grep]
      (grep %1 {:in %2 :seq true})) apply2 .
 
+;; Example usage: "-ef" ps println-each
 : nat-ps "Native 'ps' call. Results as seq on TOS."
   [args -- out]
   #(with-programs [ps]
@@ -218,7 +225,7 @@
   [file --] file util/open-file-in-browser .
 
 : -main [args --]
-  (binding [*print-stack* true]
+  (binding [*print-stack* false]
     (main/repl :init (fn []
                        (in-ns 'user)
                        (refer 'gershwin.core)
@@ -226,7 +233,7 @@
                        (refer 'gershwin.demo.shell))
                :prompt #(printf "[%s] > " fs/*cwd*)
                :print (fn [_]
-                        (let [x (clojure.lang.GershwinStack/peek)]
+                        (let [x (.peek *gershwin-stack*)]
                           (cond
 
                            (some #{x} [:quit :exit])
@@ -251,4 +258,4 @@
                            (prn x))
                           (when *print-stack*
                             (println "Data Stack:")
-                            (prn (clojure.lang.GershwinStack/getStack))))))) .
+                            (prn (.getStack *gershwin-stack*))))))) .
