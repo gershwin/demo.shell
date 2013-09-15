@@ -93,7 +93,7 @@
     (fn [path]
       (alter-var-root #'fs/*cwd*
                       (fn [_ path] path)
-                      path)) apply drop ls
+                      path)) apply drop ;; ls
     ]
   #[ #(throw (IllegalArgumentException. (str "The path '" % "' does not exist."))) apply ] if .
 
@@ -219,7 +219,7 @@
 
 : run "Load a file as a Gershwin file."
   [f -- obj]
-  absolute-path load-gershwin-file .
+  file absolute-path load-gershwin-file .
 
 : open "Open a file in 'default' program."
   [file --] file util/open-file-in-browser .
