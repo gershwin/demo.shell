@@ -18,7 +18,7 @@
     <dependency>
       <groupId>org.gershwinlang</groupId>
       <artifactId>gershwin</artifactId>
-      <version>0.2.0-master-SNAPSHOT</version>
+      <version>0.2.0</version>
     </dependency>
     <dependency>
       <groupId>me.raynes</groupId>
